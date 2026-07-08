@@ -335,7 +335,7 @@ private:
 
     void handleCommand(UINT id) {
         if (id == kCmdShow) showDetails();
-        if (id == kCmdRefresh) refresh(true);
+        if (id == kCmdRefresh) refresh(false);
         if (id == kCmdStartup) toggleStartup();
         if (id == kCmdExit) DestroyWindow(hwnd_);
     }

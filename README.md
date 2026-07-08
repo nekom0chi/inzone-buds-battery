@@ -28,7 +28,7 @@ C++ / Win32 APIで作った軽量版です。Pythonは不要です。
 - `スタートアップ起動`
 - `終了`
 
-`表示を更新` は、INZONE HUB のログを読み直して表示を更新します。インターネットから最新版を取得する機能ではありません。
+`表示を更新` は、INZONE HUB のログを読み直して通知領域の表示を更新します。インターネットから最新版を取得する機能ではなく、詳細ポップアップも表示しません。
 
 `スタートアップ起動` を選ぶと、Windows起動時に自動起動する設定をON/OFFできます。
 
@@ -38,6 +38,8 @@ C++ / Win32 APIで作った軽量版です。Pythonは不要です。
 
 - `INZONE Buds Battery.exe`
 - `LICENSE`
+
+配布用の `.exe` は、Visual Studio / MSVC でビルドしたものをおすすめします。
 
 おすすめの配置場所:
 
@@ -55,6 +57,8 @@ C:\Users\<ユーザー名>\AppData\Local\Programs\INZONE Buds Battery\INZONE Bud
 
 初回起動時に Windows Defender SmartScreen の `Windows によって PC が保護されました` が表示されることがあります。個人作成の未署名 `.exe` ではよく起きます。信頼できる配布元から入手した場合は、`詳細情報` → `実行` で起動できます。
 
+また、一部のセキュリティソフトでは、未署名の個人作成 `.exe` や MinGW の静的リンク版が誤検知されることがあります。不安な場合は、このリポジトリのソースコードを確認して、Visual Studio で自分でビルドしてください。
+
 ## ビルド
 
 MinGW / WinLibs:
@@ -63,7 +67,7 @@ MinGW / WinLibs:
 .\native\build_mingw.bat
 ```
 
-Visual Studio Build Tools:
+Visual Studio / Visual Studio Build Tools:
 
 ```powershell
 .\native\build_msvc.bat
