@@ -4,4 +4,5 @@ __pycache__/
 inzone_buds_battery_error.log
 build/
 dist/
+dist-native/
 *.spec
