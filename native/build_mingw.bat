@@ -11,7 +11,7 @@ if errorlevel 1 (
 )
 
 "%GPP%" -std=c++17 -O2 -municode -mwindows -static -static-libgcc -static-libstdc++ inzone_buds_battery.cpp ^
-  -o "..\dist-native\INZONE Buds Battery Native.exe" ^
+  -o "..\dist-native\INZONE Buds Battery.exe" ^
   -luser32 -lshell32 -lgdi32
 
 if errorlevel 1 (
@@ -19,4 +19,4 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo Built: ..\dist-native\INZONE Buds Battery Native.exe
+echo Built: ..\dist-native\INZONE Buds Battery.exe

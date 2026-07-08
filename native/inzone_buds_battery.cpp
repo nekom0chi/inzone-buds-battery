@@ -12,8 +12,8 @@ namespace {
 
 constexpr wchar_t kAppName[] = L"INZONE Buds Battery";
 constexpr wchar_t kWindowClass[] = L"INZONEBudsBatteryNativeWindow";
-constexpr wchar_t kMutexName[] = L"Local\\INZONEBudsBatteryNative";
-constexpr wchar_t kStartupFileName[] = L"INZONE Buds Battery Native.cmd";
+constexpr wchar_t kMutexName[] = L"Local\\INZONEBudsBattery";
+constexpr wchar_t kStartupFileName[] = L"INZONE Buds Battery.cmd";
 constexpr UINT kTrayMessage = WM_APP + 1;
 constexpr UINT_PTR kTimerId = 1;
 constexpr UINT kRefreshMs = 15000;
