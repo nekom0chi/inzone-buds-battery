@@ -13,6 +13,7 @@ namespace {
 constexpr wchar_t kAppName[] = L"INZONE Buds Battery";
 constexpr wchar_t kWindowClass[] = L"INZONEBudsBatteryNativeWindow";
 constexpr wchar_t kMutexName[] = L"Local\\INZONEBudsBattery";
+constexpr wchar_t kNoticeMutexName[] = L"Local\\INZONEBudsBatteryAlreadyRunningNotice";
 constexpr wchar_t kStartupFileName[] = L"INZONE Buds Battery.cmd";
 constexpr UINT kTrayMessage = WM_APP + 1;
 constexpr UINT_PTR kTimerId = 1;
@@ -287,6 +288,7 @@ private:
     HICON icon_{};
     BatteryState state_{};
     std::wstring lastSummary_;
+    bool detailsOpen_{};
 
     static LRESULT CALLBACK windowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
         auto* app = reinterpret_cast<TrayApp*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
@@ -371,7 +373,13 @@ private:
     }
 
     void showDetails() {
+        if (detailsOpen_) {
+            SetForegroundWindow(hwnd_);
+            return;
+        }
+        detailsOpen_ = true;
         MessageBoxW(hwnd_, state_.details().c_str(), kAppName, MB_OK | MB_ICONINFORMATION);
+        detailsOpen_ = false;
     }
 
     void showMenu() {
@@ -420,8 +428,14 @@ private:
 
 int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     HANDLE mutex = CreateMutexW(nullptr, FALSE, kMutexName);
-    if (GetLastError() == ERROR_ALREADY_EXISTS) {
-        MessageBoxW(nullptr, L"INZONE Buds Battery is already running.", kAppName, MB_OK | MB_ICONINFORMATION);
+    if (mutex && GetLastError() == ERROR_ALREADY_EXISTS) {
+        HANDLE noticeMutex = CreateMutexW(nullptr, FALSE, kNoticeMutexName);
+        if (noticeMutex && GetLastError() != ERROR_ALREADY_EXISTS) {
+            MessageBoxW(nullptr, L"INZONE Buds Battery はすでに起動しています。", kAppName,
+                        MB_OK | MB_ICONINFORMATION);
+        }
+        if (noticeMutex) CloseHandle(noticeMutex);
+        CloseHandle(mutex);
         return 0;
     }
     TrayApp app;
