@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+.lean-ctx/
+inzone_buds_battery_error.log
+build/
+dist/
+*.spec
