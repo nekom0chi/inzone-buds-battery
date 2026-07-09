@@ -14,7 +14,10 @@ constexpr wchar_t kAppName[] = L"INZONE Buds Battery";
 constexpr wchar_t kWindowClass[] = L"INZONEBudsBatteryNativeWindow";
 constexpr wchar_t kMutexName[] = L"Local\\INZONEBudsBattery";
 constexpr wchar_t kNoticeMutexName[] = L"Local\\INZONEBudsBatteryAlreadyRunningNotice";
-constexpr wchar_t kStartupFileName[] = L"INZONE Buds Battery.cmd";
+constexpr wchar_t kStartupLinkName[] = L"INZONE Buds Battery.lnk";
+constexpr wchar_t kLegacyStartupFileName[] = L"INZONE Buds Battery.cmd";
+constexpr wchar_t kStartupRunKey[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+constexpr wchar_t kStartupValueName[] = L"INZONE Buds Battery";
 constexpr UINT kTrayMessage = WM_APP + 1;
 constexpr UINT_PTR kTimerId = 1;
 constexpr UINT kRefreshMs = 15000;
@@ -110,8 +113,25 @@ std::wstring logPath() {
     return envPath(L"APPDATA") + L"\\Sony\\INZONE Hub\\ActionLog.log";
 }
 
+std::wstring pathJoin(const std::wstring& dir, const std::wstring& name) {
+    if (dir.empty()) return name;
+    wchar_t last = dir.back();
+    if (last == L'\\' || last == L'/') return dir + name;
+    return dir + L"\\" + name;
+}
+
+std::wstring startupDirectory() {
+    std::wstring appData = envPath(L"APPDATA");
+    if (!appData.empty()) return appData + L"\\Microsoft\\Windows\\Start Menu\\Programs\\Startup";
+    return envPath(L"APPDATA") + L"\\Microsoft\\Windows\\Start Menu\\Programs\\Startup";
+}
+
 std::wstring startupPath() {
-    return envPath(L"APPDATA") + L"\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\" + kStartupFileName;
+    return pathJoin(startupDirectory(), kStartupLinkName);
+}
+
+std::wstring legacyStartupPath() {
+    return pathJoin(startupDirectory(), kLegacyStartupFileName);
 }
 
 std::wstring modulePath() {
@@ -128,6 +148,49 @@ std::wstring modulePath() {
 bool fileExists(const std::wstring& path) {
     DWORD attrs = GetFileAttributesW(path.c_str());
     return attrs != INVALID_FILE_ATTRIBUTES && !(attrs & FILE_ATTRIBUTE_DIRECTORY);
+}
+
+void cleanupLegacyStartupFiles() {
+    DeleteFileW(startupPath().c_str());
+    DeleteFileW(legacyStartupPath().c_str());
+}
+
+std::wstring startupCommand() {
+    return L"\"" + modulePath() + L"\"";
+}
+
+bool isStartupEnabledInRegistry() {
+    HKEY key{};
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, kStartupRunKey, 0, KEY_QUERY_VALUE, &key) != ERROR_SUCCESS) {
+        return false;
+    }
+    DWORD type = 0;
+    DWORD size = 0;
+    LONG result = RegQueryValueExW(key, kStartupValueName, nullptr, &type, nullptr, &size);
+    RegCloseKey(key);
+    return result == ERROR_SUCCESS && (type == REG_SZ || type == REG_EXPAND_SZ) && size > 0;
+}
+
+bool setStartupEnabled(bool enable) {
+    HKEY key{};
+    LONG result = RegCreateKeyExW(HKEY_CURRENT_USER, kStartupRunKey, 0, nullptr, 0,
+                                  KEY_SET_VALUE | KEY_QUERY_VALUE, nullptr, &key, nullptr);
+    if (result != ERROR_SUCCESS) return false;
+
+    if (!enable) {
+        result = RegDeleteValueW(key, kStartupValueName);
+        RegCloseKey(key);
+        cleanupLegacyStartupFiles();
+        return result == ERROR_SUCCESS || result == ERROR_FILE_NOT_FOUND;
+    }
+
+    cleanupLegacyStartupFiles();
+    std::wstring command = startupCommand();
+    result = RegSetValueExW(key, kStartupValueName, 0, REG_SZ,
+                            reinterpret_cast<const BYTE*>(command.c_str()),
+                            static_cast<DWORD>((command.size() + 1) * sizeof(wchar_t)));
+    RegCloseKey(key);
+    return result == ERROR_SUCCESS && isStartupEnabledInRegistry();
 }
 
 std::string extractJsonString(const std::string& line, const std::string& key) {
@@ -402,22 +465,14 @@ private:
     }
 
     bool isStartupEnabled() const {
-        return fileExists(startupPath());
+        return isStartupEnabledInRegistry();
     }
 
     void toggleStartup() {
         bool enable = !isStartupEnabled();
-        std::wstring path = startupPath();
-        if (enable) {
-            std::wstring command = L"@echo off\r\nstart \"\" \"" + modulePath() + L"\"\r\n";
-            std::wofstream file(path.c_str());
-            if (!file) {
-                MessageBoxW(hwnd_, L"スタートアップ設定に失敗しました。", kAppName, MB_OK | MB_ICONERROR);
-                return;
-            }
-            file << command;
-        } else {
-            DeleteFileW(path.c_str());
+        if (!setStartupEnabled(enable)) {
+            MessageBoxW(hwnd_, L"スタートアップ設定に失敗しました。", kAppName, MB_OK | MB_ICONERROR);
+            return;
         }
         MessageBoxW(hwnd_, enable ? L"スタートアップをONにしました。" : L"スタートアップをOFFにしました。",
                     kAppName, MB_OK | MB_ICONINFORMATION);
