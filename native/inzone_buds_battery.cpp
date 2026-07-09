@@ -156,7 +156,7 @@ void cleanupLegacyStartupFiles() {
 }
 
 std::wstring startupCommand() {
-    return L"\"" + modulePath() + L"\" --startup";
+    return L"\"" + modulePath() + L"\"";
 }
 
 bool isStartupEnabledInRegistry() {
@@ -329,13 +329,12 @@ HICON createBatteryIcon(int percent) {
 
 class TrayApp {
 public:
-    int run(HINSTANCE instance, bool showInitialDetails) {
+    int run(HINSTANCE instance) {
         instance_ = instance;
         state_ = readBatteryState();
         if (!createWindow()) return 1;
         addOrUpdateIcon(NIM_ADD);
         SetTimer(hwnd_, kTimerId, kRefreshMs, nullptr);
-        if (showInitialDetails) showDetails();
 
         MSG msg{};
         while (GetMessageW(&msg, nullptr, 0, 0)) {
@@ -481,10 +480,7 @@ private:
 
 }  // namespace
 
-int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR commandLine, int) {
-    std::wstring args = commandLine ? commandLine : L"";
-    bool startupLaunch = args.find(L"--startup") != std::wstring::npos;
-
+int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     HANDLE mutex = CreateMutexW(nullptr, FALSE, kMutexName);
     if (mutex && GetLastError() == ERROR_ALREADY_EXISTS) {
         HANDLE noticeMutex = CreateMutexW(nullptr, FALSE, kNoticeMutexName);
@@ -497,7 +493,7 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR commandLine, int) {
         return 0;
     }
     TrayApp app;
-    int result = app.run(instance, !startupLaunch);
+    int result = app.run(instance);
     if (mutex) CloseHandle(mutex);
     return result;
 }
