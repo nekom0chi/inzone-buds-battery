@@ -31,8 +31,8 @@ constexpr UINT kTrayMessage = WM_APP + 1;
 constexpr UINT_PTR kTimerId = 1;
 constexpr UINT kRefreshMs = 15000;
 constexpr int kProductImageResource = 101;
-constexpr int kDashboardWidth = 620;
-constexpr int kDashboardHeight = 600;
+constexpr int kDashboardWidth = 440;
+constexpr int kDashboardHeight = 480;
 
 constexpr UINT kCmdShow = 1001;
 constexpr UINT kCmdRefresh = 1002;
@@ -64,6 +64,8 @@ struct BatteryState {
     BatteryValue left;
     BatteryValue right;
     BatteryValue caseBattery;
+    std::string eqPreset = "Unknown";
+    long long eqTimestamp = 0;
     std::wstring error;
 
     int iconPercent() const {
@@ -277,7 +279,7 @@ BatteryState readBatteryState() {
 
     std::string line;
     while (std::getline(file, line)) {
-        if (line.find("batteryStatus") == std::string::npos) continue;
+        if (line.find("batteryStatus") == std::string::npos && line.find("eqPreset") == std::string::npos) continue;
         std::string item = extractJsonString(line, "item");
         std::string value = extractJsonString(line, "value");
         std::string local = extractJsonString(line, "localTime");
@@ -288,6 +290,9 @@ BatteryState readBatteryState() {
             updateValue(state.right, value, local, timestamp);
         } else if (item == "batteryStatusCase") {
             updateValue(state.caseBattery, value, local, timestamp);
+        } else if (item == "eqPreset" && timestamp >= state.eqTimestamp) {
+            state.eqPreset = value.empty() ? "Unknown" : value;
+            state.eqTimestamp = timestamp;
         }
     }
     return state;
@@ -637,16 +642,16 @@ private:
 
     void drawBatteryBadge(Gdiplus::Graphics& graphics, float x, float y, const wchar_t* name,
                           const std::wstring& value, const Gdiplus::Color& accent) {
-        Gdiplus::RectF badge(x, y, 96.0f, 58.0f);
+        Gdiplus::RectF badge(x, y, 78.0f, 48.0f);
         fillRoundedRect(graphics, badge, 8.0f, Gdiplus::Color(244, 255, 255, 255));
         Gdiplus::Pen border(Gdiplus::Color(34, accent.GetR(), accent.GetG(), accent.GetB()), 1.0f);
         graphics.DrawRectangle(&border, badge.X, badge.Y, badge.Width, badge.Height);
 
-        Gdiplus::Font labelFont(L"Yu Gothic UI", 12.0f, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
-        Gdiplus::Font valueFont(L"Segoe UI", 22.0f, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
-        drawCenteredText(graphics, name, labelFont, Gdiplus::RectF(x, y + 5, 96, 18),
+        Gdiplus::Font labelFont(L"Yu Gothic UI", 10.0f, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+        Gdiplus::Font valueFont(L"Segoe UI", 18.0f, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+        drawCenteredText(graphics, name, labelFont, Gdiplus::RectF(x, y + 3, 78, 15),
                          Gdiplus::Color(255, 86, 92, 101));
-        drawCenteredText(graphics, value, valueFont, Gdiplus::RectF(x, y + 22, 96, 30), accent);
+        drawCenteredText(graphics, value, valueFont, Gdiplus::RectF(x, y + 17, 78, 26), accent);
     }
 
     void drawGraphLine(Gdiplus::Graphics& graphics, const Gdiplus::RectF& chart,
@@ -690,35 +695,41 @@ private:
         graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
         graphics.Clear(Gdiplus::Color(255, 246, 248, 250));
 
-        Gdiplus::Font titleFont(L"Yu Gothic UI", 24.0f, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
-        Gdiplus::Font subtitleFont(L"Yu Gothic UI", 12.0f, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
+        Gdiplus::Font titleFont(L"Yu Gothic UI", 20.0f, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+        Gdiplus::Font subtitleFont(L"Yu Gothic UI", 10.0f, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
         Gdiplus::SolidBrush titleBrush(Gdiplus::Color(255, 29, 33, 38));
         Gdiplus::SolidBrush mutedBrush(Gdiplus::Color(255, 102, 110, 120));
-        graphics.DrawString(L"INZONE Buds", -1, &titleFont, Gdiplus::PointF(24, 18), &titleBrush);
+        graphics.DrawString(L"INZONE Buds", -1, &titleFont, Gdiplus::PointF(18, 12), &titleBrush);
         std::wstring updated = L"最終更新: " + widen(state_.newestLocalTime());
         if (state_.newestLocalTime().empty()) updated = L"INZONE HUBのログを待っています";
-        graphics.DrawString(updated.c_str(), -1, &subtitleFont, Gdiplus::PointF(26, 52), &mutedBrush);
+        graphics.DrawString(updated.c_str(), -1, &subtitleFont, Gdiplus::PointF(20, 39), &mutedBrush);
+
+        Gdiplus::RectF eqButton(static_cast<float>(width - 138), 10, 120, 32);
+        fillRoundedRect(graphics, eqButton, 6.0f, Gdiplus::Color(255, 36, 42, 49));
+        Gdiplus::Font eqFont(L"Yu Gothic UI", 11.0f, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+        std::wstring eqLabel = L"EQ  " + widen(state_.eqPreset) + L"  >";
+        drawCenteredText(graphics, eqLabel, eqFont, eqButton, Gdiplus::Color(255, 255, 255, 255));
 
         if (productImage_ && productImage_->GetLastStatus() == Gdiplus::Ok) {
-            const float imageWidth = std::min(650.0f, static_cast<float>(width - 64));
+            const float imageWidth = std::min(400.0f, static_cast<float>(width - 40));
             float imageHeight = imageWidth * productImage_->GetHeight() / productImage_->GetWidth();
-            graphics.DrawImage(productImage_.get(), Gdiplus::RectF((width - imageWidth) / 2.0f, 72.0f,
+            graphics.DrawImage(productImage_.get(), Gdiplus::RectF((width - imageWidth) / 2.0f, 55.0f,
                                                                     imageWidth, imageHeight));
         }
 
-        drawBatteryBadge(graphics, 42, 262, L"L", state_.left.label(), Gdiplus::Color(255, 39, 143, 92));
-        drawBatteryBadge(graphics, width / 2.0f - 48, 262, L"CASE", state_.caseBattery.label(),
+        drawBatteryBadge(graphics, 24, 181, L"L", state_.left.label(), Gdiplus::Color(255, 39, 143, 92));
+        drawBatteryBadge(graphics, width / 2.0f - 39, 181, L"CASE", state_.caseBattery.label(),
                          Gdiplus::Color(255, 73, 82, 94));
-        drawBatteryBadge(graphics, width - 138.0f, 262, L"R", state_.right.label(),
+        drawBatteryBadge(graphics, width - 102.0f, 181, L"R", state_.right.label(),
                          Gdiplus::Color(255, 206, 67, 67));
 
-        Gdiplus::RectF graphCard(20, 340, static_cast<float>(width - 40), static_cast<float>(height - 360));
+        Gdiplus::RectF graphCard(12, 244, static_cast<float>(width - 24), static_cast<float>(height - 256));
         fillRoundedRect(graphics, graphCard, 8.0f, Gdiplus::Color(255, 255, 255, 255));
-        Gdiplus::Font graphTitleFont(L"Yu Gothic UI", 16.0f, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
-        graphics.DrawString(L"バッテリー履歴", -1, &graphTitleFont, Gdiplus::PointF(40, 360), &titleBrush);
+        Gdiplus::Font graphTitleFont(L"Yu Gothic UI", 14.0f, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+        graphics.DrawString(L"バッテリー履歴", -1, &graphTitleFont, Gdiplus::PointF(28, 260), &titleBrush);
 
-        Gdiplus::RectF dayTab(static_cast<float>(width - 210), 352, 82, 34);
-        Gdiplus::RectF weekTab(static_cast<float>(width - 120), 352, 82, 34);
+        Gdiplus::RectF dayTab(static_cast<float>(width - 164), 252, 68, 30);
+        Gdiplus::RectF weekTab(static_cast<float>(width - 90), 252, 68, 30);
         fillRoundedRect(graphics, dayTab, 6.0f, showWeek_ ? Gdiplus::Color(255, 238, 241, 244)
                                                        : Gdiplus::Color(255, 36, 42, 49));
         fillRoundedRect(graphics, weekTab, 6.0f, showWeek_ ? Gdiplus::Color(255, 36, 42, 49)
@@ -729,14 +740,14 @@ private:
         drawCenteredText(graphics, L"1週間", tabFont, weekTab,
                          showWeek_ ? Gdiplus::Color(255, 255, 255, 255) : Gdiplus::Color(255, 66, 73, 82));
 
-        Gdiplus::RectF chart(72, 410, static_cast<float>(width - 110), static_cast<float>(height - 492));
+        Gdiplus::RectF chart(56, 304, static_cast<float>(width - 76), static_cast<float>(height - 362));
         Gdiplus::Font axisFont(L"Segoe UI", 10.0f, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
         Gdiplus::Pen gridPen(Gdiplus::Color(255, 226, 230, 234), 1.0f);
         for (int value : {0, 25, 50, 75, 100}) {
             float y = chart.GetBottom() - value / 100.0f * chart.Height;
             graphics.DrawLine(&gridPen, chart.X, y, chart.GetRight(), y);
             drawCenteredText(graphics, std::to_wstring(value), axisFont,
-                             Gdiplus::RectF(34, y - 8, 32, 16), Gdiplus::Color(255, 122, 130, 139));
+                             Gdiplus::RectF(20, y - 8, 32, 16), Gdiplus::Color(255, 122, 130, 139));
         }
 
         if (!history_.empty()) {
@@ -822,9 +833,13 @@ private:
                 int y = GET_Y_LPARAM(lparam);
                 RECT client{};
                 GetClientRect(hwnd, &client);
-                if (y >= 352 && y <= 386) {
-                    if (x >= client.right - 210 && x <= client.right - 128) showWeek_ = false;
-                    if (x >= client.right - 120 && x <= client.right - 38) showWeek_ = true;
+                if (x >= client.right - 138 && x <= client.right - 18 && y >= 10 && y <= 42) {
+                    openInzoneHub();
+                    return 0;
+                }
+                if (y >= 252 && y <= 282) {
+                    if (x >= client.right - 164 && x <= client.right - 96) showWeek_ = false;
+                    if (x >= client.right - 90 && x <= client.right - 22) showWeek_ = true;
                     InvalidateRect(hwnd, nullptr, FALSE);
                 }
                 return 0;
@@ -924,6 +939,20 @@ private:
         if (show) showDetails();
     }
 
+    void openInzoneHub() {
+        std::wstring hubPath = envPath(L"ProgramFiles") + L"\\Sony\\INZONE Hub\\INZONEHub.exe";
+        if (!fileExists(hubPath)) {
+            MessageBoxW(dashboard_, L"INZONE HUBが見つかりません。", kAppName, MB_OK | MB_ICONERROR);
+            return;
+        }
+        HINSTANCE result = ShellExecuteW(nullptr, L"open", hubPath.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        if (reinterpret_cast<INT_PTR>(result) <= 32) {
+            MessageBoxW(dashboard_, L"INZONE HUBを起動できませんでした。", kAppName, MB_OK | MB_ICONERROR);
+        } else {
+            ShowWindow(dashboard_, SW_HIDE);
+        }
+    }
+
     void showDetails() {
         if (!dashboard_) return;
         refresh(false);
@@ -934,13 +963,8 @@ private:
         HMONITOR monitor = MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
         MONITORINFO monitorInfo{sizeof(monitorInfo)};
         GetMonitorInfoW(monitor, &monitorInfo);
-        int x = cursor.x - kDashboardWidth + 36;
-        int y = monitorInfo.rcWork.bottom - kDashboardHeight - 10;
-        int left = static_cast<int>(monitorInfo.rcWork.left) + 10;
-        int right = static_cast<int>(monitorInfo.rcWork.right) - kDashboardWidth - 10;
-        int top = static_cast<int>(monitorInfo.rcWork.top) + 10;
-        x = std::clamp(x, left, right);
-        y = std::max(y, top);
+        int x = static_cast<int>(monitorInfo.rcWork.right) - kDashboardWidth - 12;
+        int y = static_cast<int>(monitorInfo.rcWork.bottom) - kDashboardHeight - 12;
         SetWindowPos(dashboard_, HWND_TOPMOST, x, y, kDashboardWidth, kDashboardHeight,
                      SWP_SHOWWINDOW | SWP_NOOWNERZORDER);
         SetForegroundWindow(dashboard_);
