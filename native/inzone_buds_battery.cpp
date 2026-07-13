@@ -417,7 +417,7 @@ private:
         data.cbSize = sizeof(data);
         data.hWnd = hwnd_;
         data.uID = 1;
-        data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
+        data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP;
         data.uCallbackMessage = kTrayMessage;
         data.hIcon = icon_;
         std::wstring tip = std::wstring(kAppName) + L": " + state_.summary();
