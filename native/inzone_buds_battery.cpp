@@ -387,10 +387,12 @@ private:
             case WM_COMMAND:
                 handleCommand(LOWORD(wparam));
                 return 0;
-            case kTrayMessage:
-                if (lparam == WM_LBUTTONUP) showDetails();
-                if (lparam == WM_RBUTTONUP) showMenu();
+            case kTrayMessage: {
+                UINT event = LOWORD(lparam);
+                if (event == WM_LBUTTONUP) showDetails();
+                if (event == WM_RBUTTONUP || event == WM_CONTEXTMENU) showMenu();
                 return 0;
+            }
             case WM_DESTROY:
             {
                 auto data = notifyData();
