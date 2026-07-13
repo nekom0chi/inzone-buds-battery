@@ -333,6 +333,7 @@ public:
         instance_ = instance;
         state_ = readBatteryState();
         if (!createWindow()) return 1;
+        taskbarCreatedMessage_ = RegisterWindowMessageW(L"TaskbarCreated");
         addOrUpdateIcon(NIM_ADD);
         SetTimer(hwnd_, kTimerId, kRefreshMs, nullptr);
 
@@ -351,6 +352,7 @@ private:
     BatteryState state_{};
     std::wstring lastSummary_;
     bool detailsOpen_{};
+    UINT taskbarCreatedMessage_{};
 
     static LRESULT CALLBACK windowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
         auto* app = reinterpret_cast<TrayApp*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
@@ -374,6 +376,10 @@ private:
     }
 
     LRESULT handleMessage(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
+        if (taskbarCreatedMessage_ != 0 && msg == taskbarCreatedMessage_) {
+            addOrUpdateIcon(NIM_ADD);
+            return 0;
+        }
         switch (msg) {
             case WM_TIMER:
                 refresh(false);
@@ -419,11 +425,20 @@ private:
 
     void addOrUpdateIcon(DWORD command) {
         std::wstring summary = state_.summary();
-        if (command == NIM_MODIFY && summary == lastSummary_) return;
-        HICON old = icon_;
-        icon_ = createBatteryIcon(state_.iconPercent());
+        HICON old = nullptr;
+        if (!icon_ || summary != lastSummary_) {
+            old = icon_;
+            icon_ = createBatteryIcon(state_.iconPercent());
+        }
         auto data = notifyData();
-        Shell_NotifyIconW(command, &data);
+        bool registered = Shell_NotifyIconW(command, &data) != FALSE;
+        if (!registered && command == NIM_MODIFY) {
+            registered = Shell_NotifyIconW(NIM_ADD, &data) != FALSE;
+        }
+        if (registered) {
+            data.uVersion = NOTIFYICON_VERSION_4;
+            Shell_NotifyIconW(NIM_SETVERSION, &data);
+        }
         lastSummary_ = summary;
         if (old) DestroyIcon(old);
     }
