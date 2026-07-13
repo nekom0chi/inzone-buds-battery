@@ -40,6 +40,13 @@ constexpr int kWhiteProductImageResource = 102;
 constexpr int kPurpleProductImageResource = 103;
 constexpr int kDashboardWidth = 460;
 constexpr int kDashboardHeight = 680;
+constexpr int kEqControlLeft = 104;
+constexpr int kEqControlRight = 448;
+constexpr int kEqControlTop = 219;
+constexpr int kEqControlBottom = 255;
+constexpr int kEqMenuTop = 260;
+constexpr int kEqMenuItemTop = 266;
+constexpr int kEqMenuItemHeight = 31;
 
 constexpr UINT kCmdShow = 1001;
 constexpr UINT kCmdRefresh = 1002;
@@ -920,6 +927,8 @@ private:
     std::array<std::unique_ptr<Gdiplus::Bitmap>, 3> productImages_;
     AppSettings settings_{};
     long long selectedDayStart_{};
+    bool eqMenuOpen_{};
+    int eqHoverIndex_ = -1;
     ULONG_PTR gdiplusToken_{};
     bool comInitialized_{};
     UINT taskbarCreatedMessage_{};
@@ -1137,14 +1146,21 @@ private:
             legendX += i == 2 ? 0.0f : 62.0f;
         }
 
-        Gdiplus::RectF eqButton(104, 219, static_cast<float>(width - 116), 36);
+        Gdiplus::RectF eqButton(kEqControlLeft, kEqControlTop,
+                                static_cast<float>(kEqControlRight - kEqControlLeft),
+                                static_cast<float>(kEqControlBottom - kEqControlTop));
         fillRoundedRect(graphics, eqButton, 6.0f, Gdiplus::Color(255, 31, 37, 45));
-        Gdiplus::Pen eqBorder(Gdiplus::Color(255, 58, 68, 81), 1.0f);
+        Gdiplus::Pen eqBorder(eqMenuOpen_ ? Gdiplus::Color(255, 103, 137, 177)
+                                         : Gdiplus::Color(255, 58, 68, 81),
+                              1.0f);
         graphics.DrawRectangle(&eqBorder, eqButton.X, eqButton.Y, eqButton.Width, eqButton.Height);
         Gdiplus::Font sectionFont(L"Yu Gothic UI", 12.0f, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
         graphics.DrawString(L"EQ", -1, &sectionFont, Gdiplus::PointF(22, 228), &mutedBrush);
-        std::wstring eqLabel = widen(state_.eqPreset) + L"   \x25BE";
-        drawCenteredText(graphics, eqLabel, sectionFont, eqButton, Gdiplus::Color(255, 247, 249, 252));
+        std::wstring eqLabel = widen(state_.eqPreset);
+        Gdiplus::SolidBrush eqTextBrush(Gdiplus::Color(255, 247, 249, 252));
+        graphics.DrawString(eqLabel.c_str(), -1, &sectionFont, Gdiplus::PointF(120, 228), &eqTextBrush);
+        drawRightText(graphics, eqMenuOpen_ ? L"\x25B4" : L"\x25BE", sectionFont,
+                      Gdiplus::RectF(410, 219, 22, 36), Gdiplus::Color(255, 171, 180, 191));
 
         long long today = localDayStart(static_cast<long long>(std::time(nullptr)));
         long long weekStart = addLocalDays(today, -7);
@@ -1188,6 +1204,41 @@ private:
         drawBarChart(graphics, Gdiplus::RectF(42, 493, static_cast<float>(width - 66), 132),
                      dayBuckets, dayLabels, false);
 
+        if (eqMenuOpen_) {
+            Gdiplus::RectF shadow(kEqControlLeft - 4.0f, kEqMenuTop + 4.0f,
+                                  static_cast<float>(kEqControlRight - kEqControlLeft + 8), 198.0f);
+            fillRoundedRect(graphics, shadow, 9.0f, Gdiplus::Color(150, 0, 0, 0));
+            Gdiplus::RectF menu(kEqControlLeft, kEqMenuTop,
+                                static_cast<float>(kEqControlRight - kEqControlLeft), 198.0f);
+            fillRoundedRect(graphics, menu, 8.0f, Gdiplus::Color(255, 24, 29, 36));
+            Gdiplus::Pen menuBorder(Gdiplus::Color(255, 67, 78, 92), 1.0f);
+            graphics.DrawRectangle(&menuBorder, menu.X, menu.Y, menu.Width, menu.Height);
+            Gdiplus::Font menuFont(L"Yu Gothic UI", 12.0f, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
+            Gdiplus::Font checkFont(L"Yu Gothic UI", 13.0f, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+            for (size_t i = 0; i < kEqPresets.size(); ++i) {
+                float rowY = static_cast<float>(kEqMenuItemTop + static_cast<int>(i) * kEqMenuItemHeight);
+                Gdiplus::RectF row(kEqControlLeft + 6.0f, rowY,
+                                   static_cast<float>(kEqControlRight - kEqControlLeft - 12),
+                                   static_cast<float>(kEqMenuItemHeight));
+                bool selected = settings_.eqPreset == kEqPresets[i].key;
+                if (static_cast<int>(i) == eqHoverIndex_) {
+                    fillRoundedRect(graphics, row, 5.0f, Gdiplus::Color(255, 48, 57, 68));
+                } else if (selected) {
+                    fillRoundedRect(graphics, row, 5.0f, Gdiplus::Color(255, 34, 43, 53));
+                }
+                if (selected) {
+                    Gdiplus::SolidBrush accent(Gdiplus::Color(255, 84, 211, 164));
+                    graphics.FillRectangle(&accent, row.X, row.Y + 5.0f, 3.0f, row.Height - 10.0f);
+                    graphics.DrawString(L"\x2713", -1, &checkFont,
+                                        Gdiplus::PointF(row.X + 10.0f, row.Y + 6.0f), &accent);
+                }
+                Gdiplus::SolidBrush itemBrush(selected ? Gdiplus::Color(255, 247, 249, 252)
+                                                       : Gdiplus::Color(255, 203, 210, 220));
+                graphics.DrawString(kEqPresets[i].label, -1, &menuFont,
+                                    Gdiplus::PointF(row.X + 35.0f, row.Y + 7.0f), &itemBrush);
+            }
+        }
+
         Gdiplus::Pen popupBorder(Gdiplus::Color(255, 58, 67, 79), 1.0f);
         Gdiplus::GraphicsPath borderPath;
         Gdiplus::RectF borderRect(0.5f, 0.5f, static_cast<float>(width - 1), static_cast<float>(height - 1));
@@ -1208,10 +1259,20 @@ private:
         EndPaint(hwnd, &paint);
     }
 
+    int eqMenuIndexAt(int x, int y) const {
+        int menuBottom = kEqMenuItemTop + static_cast<int>(kEqPresets.size()) * kEqMenuItemHeight;
+        if (x < kEqControlLeft || x > kEqControlRight || y < kEqMenuItemTop || y >= menuBottom) return -1;
+        return (y - kEqMenuItemTop) / kEqMenuItemHeight;
+    }
+
     LRESULT handleDashboardMessage(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
         switch (msg) {
             case WM_ACTIVATE:
-                if (LOWORD(wparam) == WA_INACTIVE && IsWindowVisible(hwnd)) ShowWindow(hwnd, SW_HIDE);
+                if (LOWORD(wparam) == WA_INACTIVE && IsWindowVisible(hwnd)) {
+                    eqMenuOpen_ = false;
+                    eqHoverIndex_ = -1;
+                    ShowWindow(hwnd, SW_HIDE);
+                }
                 return 0;
             case WM_MOUSEACTIVATE:
                 return MA_ACTIVATE;
@@ -1229,11 +1290,45 @@ private:
                 return 0;
             case WM_ERASEBKGND:
                 return 1;
+            case WM_MOUSEMOVE: {
+                TRACKMOUSEEVENT tracking{sizeof(tracking), TME_LEAVE, hwnd, 0};
+                TrackMouseEvent(&tracking);
+                if (eqMenuOpen_) {
+                    int hover = eqMenuIndexAt(GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam));
+                    if (hover != eqHoverIndex_) {
+                        eqHoverIndex_ = hover;
+                        InvalidateRect(hwnd, nullptr, FALSE);
+                    }
+                }
+                return 0;
+            }
+            case WM_MOUSELEAVE:
+                if (eqHoverIndex_ != -1) {
+                    eqHoverIndex_ = -1;
+                    InvalidateRect(hwnd, nullptr, FALSE);
+                }
+                return 0;
             case WM_LBUTTONUP: {
                 int x = GET_X_LPARAM(lparam);
                 int y = GET_Y_LPARAM(lparam);
                 RECT client{};
                 GetClientRect(hwnd, &client);
+                bool eqButton = x >= kEqControlLeft && x <= kEqControlRight &&
+                                y >= kEqControlTop && y <= kEqControlBottom;
+                if (eqMenuOpen_) {
+                    int index = eqMenuIndexAt(x, y);
+                    if (index >= 0) {
+                        eqMenuOpen_ = false;
+                        eqHoverIndex_ = -1;
+                        applyEqPreset(static_cast<size_t>(index));
+                        return 0;
+                    }
+                    if (!eqButton) {
+                        eqMenuOpen_ = false;
+                        eqHoverIndex_ = -1;
+                        InvalidateRect(hwnd, nullptr, FALSE);
+                    }
+                }
                 if (y >= 12 && y <= 42) {
                     const int centers[] = {374, 405, 436};
                     for (int i = 0; i < 3; ++i) {
@@ -1245,7 +1340,7 @@ private:
                         }
                     }
                 }
-                if (x >= 104 && x <= client.right - 12 && y >= 219 && y <= 255) {
+                if (eqButton) {
                     showEqMenu();
                     return 0;
                 }
@@ -1259,7 +1354,13 @@ private:
                 return 0;
             }
             case WM_KEYDOWN:
-                if (wparam == VK_ESCAPE) ShowWindow(hwnd, SW_HIDE);
+                if (wparam == VK_ESCAPE && eqMenuOpen_) {
+                    eqMenuOpen_ = false;
+                    eqHoverIndex_ = -1;
+                    InvalidateRect(hwnd, nullptr, FALSE);
+                } else if (wparam == VK_ESCAPE) {
+                    ShowWindow(hwnd, SW_HIDE);
+                }
                 return 0;
             case WM_CLOSE:
                 ShowWindow(hwnd, SW_HIDE);
@@ -1369,23 +1470,15 @@ private:
     }
 
     void showEqMenu() {
-        HMENU menu = CreatePopupMenu();
-        for (size_t i = 0; i < kEqPresets.size(); ++i) {
-            UINT flags = MF_STRING;
-            if (settings_.eqPreset == kEqPresets[i].key) flags |= MF_CHECKED;
-            AppendMenuW(menu, flags, 2100 + static_cast<UINT>(i), kEqPresets[i].label);
-        }
-        POINT point{104, 255};
-        ClientToScreen(dashboard_, &point);
-        SetForegroundWindow(dashboard_);
-        UINT command = TrackPopupMenu(menu, TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RETURNCMD | TPM_NONOTIFY,
-                                      point.x, point.y, 0, dashboard_, nullptr);
-        DestroyMenu(menu);
-        if (command) PostMessageW(hwnd_, WM_COMMAND, command, 0);
+        eqMenuOpen_ = !eqMenuOpen_;
+        eqHoverIndex_ = -1;
+        InvalidateRect(dashboard_, nullptr, FALSE);
     }
 
     void showDetails() {
         if (!dashboard_) return;
+        eqMenuOpen_ = false;
+        eqHoverIndex_ = -1;
         refresh(false);
         history_ = readBatteryHistory();
         InvalidateRect(dashboard_, nullptr, FALSE);
