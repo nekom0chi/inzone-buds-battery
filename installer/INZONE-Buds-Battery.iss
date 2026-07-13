@@ -1,5 +1,5 @@
 #define MyAppName "INZONE Buds Battery"
-#define MyAppVersion "1.1.2"
+#define MyAppVersion "1.2.0"
 #define MyAppPublisher "nekom0chi"
 #define MyAppExeName "INZONE Buds Battery.exe"
 
