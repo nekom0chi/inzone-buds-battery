@@ -1,9 +1,16 @@
 #include <windows.h>
+#include <windowsx.h>
 #include <shellapi.h>
+#include <gdiplus.h>
+#include <objidl.h>
 
 #include <algorithm>
+#include <cstdio>
+#include <cstring>
+#include <ctime>
 #include <cstdlib>
 #include <fstream>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -12,6 +19,7 @@ namespace {
 
 constexpr wchar_t kAppName[] = L"INZONE Buds Battery";
 constexpr wchar_t kWindowClass[] = L"INZONEBudsBatteryNativeWindow";
+constexpr wchar_t kDashboardClass[] = L"INZONEBudsBatteryDashboardWindow";
 constexpr wchar_t kMutexName[] = L"Local\\INZONEBudsBattery";
 constexpr wchar_t kNoticeMutexName[] = L"Local\\INZONEBudsBatteryAlreadyRunningNotice";
 constexpr wchar_t kStartupLinkName[] = L"INZONE Buds Battery.lnk";
@@ -21,6 +29,9 @@ constexpr wchar_t kStartupValueName[] = L"INZONE Buds Battery";
 constexpr UINT kTrayMessage = WM_APP + 1;
 constexpr UINT_PTR kTimerId = 1;
 constexpr UINT kRefreshMs = 15000;
+constexpr int kProductImageResource = 101;
+constexpr int kDashboardWidth = 760;
+constexpr int kDashboardHeight = 640;
 
 constexpr UINT kCmdShow = 1001;
 constexpr UINT kCmdRefresh = 1002;
@@ -111,6 +122,14 @@ std::wstring envPath(const wchar_t* name) {
 
 std::wstring logPath() {
     return envPath(L"APPDATA") + L"\\Sony\\INZONE Hub\\ActionLog.log";
+}
+
+std::wstring historyDirectory() {
+    return envPath(L"LOCALAPPDATA") + L"\\INZONE Buds Battery";
+}
+
+std::wstring historyPath() {
+    return historyDirectory() + L"\\battery-history.csv";
 }
 
 std::wstring pathJoin(const std::wstring& dir, const std::wstring& name) {
@@ -273,6 +292,174 @@ BatteryState readBatteryState() {
     return state;
 }
 
+struct HistorySample {
+    long long timestamp = 0;
+    int left = -1;
+    int right = -1;
+    int caseBattery = -1;
+};
+
+long long unixSeconds(long long timestamp) {
+    while (timestamp > 40'000'000'000LL) timestamp /= 1000;
+    return timestamp;
+}
+
+bool parseStoredSample(const std::string& line, HistorySample& sample) {
+    long long timestamp = 0;
+    int left = -1;
+    int right = -1;
+    int caseBattery = -1;
+    if (std::sscanf(line.c_str(), "%lld,%d,%d,%d", &timestamp, &left, &right, &caseBattery) != 4) return false;
+    sample = {timestamp, left, right, caseBattery};
+    return timestamp > 0;
+}
+
+void recordBatteryHistory(const BatteryState& state) {
+    static long long lastWrite = 0;
+    static int lastLeft = -2;
+    static int lastRight = -2;
+    static int lastCase = -2;
+
+    int left = state.left.percent();
+    int right = state.right.percent();
+    int caseBattery = state.caseBattery.percent();
+    if (left < 0 && right < 0 && caseBattery < 0) return;
+
+    long long now = static_cast<long long>(std::time(nullptr));
+    bool changed = left != lastLeft || right != lastRight || caseBattery != lastCase;
+    if (!changed && now - lastWrite < 5 * 60) return;
+
+    CreateDirectoryW(historyDirectory().c_str(), nullptr);
+    std::ofstream file(historyPath().c_str(), std::ios::app);
+    if (!file) return;
+    file << now << ',' << left << ',' << right << ',' << caseBattery << '\n';
+    lastWrite = now;
+    lastLeft = left;
+    lastRight = right;
+    lastCase = caseBattery;
+}
+
+void pruneStoredHistory() {
+    std::ifstream input(historyPath().c_str());
+    if (!input) return;
+    long long cutoff = static_cast<long long>(std::time(nullptr)) - 8LL * 24 * 60 * 60;
+    std::vector<HistorySample> samples;
+    std::string line;
+    while (std::getline(input, line)) {
+        HistorySample sample;
+        if (parseStoredSample(line, sample) && sample.timestamp >= cutoff) samples.push_back(sample);
+    }
+    input.close();
+
+    std::wstring temporary = historyPath() + L".tmp";
+    std::ofstream output(temporary.c_str(), std::ios::trunc);
+    if (!output) return;
+    for (const auto& sample : samples) {
+        output << sample.timestamp << ',' << sample.left << ',' << sample.right << ',' << sample.caseBattery << '\n';
+    }
+    output.close();
+    MoveFileExW(temporary.c_str(), historyPath().c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+}
+
+std::vector<HistorySample> readBatteryHistory() {
+    std::vector<HistorySample> history;
+    auto appendStoredHistory = [&history]() {
+        std::ifstream stored(historyPath().c_str());
+        std::string storedLine;
+        while (std::getline(stored, storedLine)) {
+            HistorySample sample;
+            if (parseStoredSample(storedLine, sample)) history.push_back(sample);
+        }
+        long long cutoff = static_cast<long long>(std::time(nullptr)) - 8LL * 24 * 60 * 60;
+        history.erase(std::remove_if(history.begin(), history.end(),
+                                     [cutoff](const HistorySample& sample) { return sample.timestamp < cutoff; }),
+                      history.end());
+        std::sort(history.begin(), history.end(),
+                  [](const HistorySample& a, const HistorySample& b) { return a.timestamp < b.timestamp; });
+    };
+
+    std::ifstream file(logPath().c_str(), std::ios::binary);
+    if (!file) {
+        appendStoredHistory();
+        return history;
+    }
+
+    file.seekg(0, std::ios::end);
+    std::streamoff size = file.tellg();
+    constexpr std::streamoff kHistoryReadLimit = 64LL * 1024 * 1024;
+    std::streamoff start = size > kHistoryReadLimit ? size - kHistoryReadLimit : 0;
+    file.seekg(start, std::ios::beg);
+    if (start > 0) {
+        std::string ignored;
+        std::getline(file, ignored);
+    }
+
+    int left = -1;
+    int right = -1;
+    int caseBattery = -1;
+    std::string line;
+    while (std::getline(file, line)) {
+        if (line.find("batteryStatus") == std::string::npos) continue;
+        std::string item = extractJsonString(line, "item");
+        BatteryValue value;
+        value.value = extractJsonString(line, "value");
+        int percent = value.percent();
+        long long timestamp = unixSeconds(extractJsonInt64(line, "timeStamp"));
+        if (timestamp <= 0) continue;
+
+        if (item == "batteryStatusLeft") left = percent;
+        else if (item == "batteryStatusRight") right = percent;
+        else if (item == "batteryStatusCase") caseBattery = percent;
+        else continue;
+
+        if (!history.empty() && history.back().timestamp == timestamp) {
+            history.back() = {timestamp, left, right, caseBattery};
+        } else {
+            history.push_back({timestamp, left, right, caseBattery});
+        }
+    }
+    appendStoredHistory();
+    return history;
+}
+
+std::wstring formatGraphTime(long long timestamp, bool week) {
+    std::time_t value = static_cast<std::time_t>(timestamp);
+    std::tm local{};
+    localtime_s(&local, &value);
+    wchar_t buffer[32]{};
+    wcsftime(buffer, std::size(buffer), week ? L"%m/%d" : L"%H:%M", &local);
+    return buffer;
+}
+
+std::unique_ptr<Gdiplus::Bitmap> loadPngResource(HINSTANCE instance, int resourceId) {
+    HRSRC resource = FindResourceW(instance, MAKEINTRESOURCEW(resourceId), RT_RCDATA);
+    if (!resource) return nullptr;
+    DWORD size = SizeofResource(instance, resource);
+    HGLOBAL loaded = LoadResource(instance, resource);
+    const void* source = LockResource(loaded);
+    if (!source || size == 0) return nullptr;
+
+    HGLOBAL copy = GlobalAlloc(GMEM_MOVEABLE, size);
+    if (!copy) return nullptr;
+    void* destination = GlobalLock(copy);
+    memcpy(destination, source, size);
+    GlobalUnlock(copy);
+
+    IStream* stream = nullptr;
+    if (CreateStreamOnHGlobal(copy, TRUE, &stream) != S_OK) {
+        GlobalFree(copy);
+        return nullptr;
+    }
+    std::unique_ptr<Gdiplus::Bitmap> sourceBitmap(Gdiplus::Bitmap::FromStream(stream));
+    std::unique_ptr<Gdiplus::Bitmap> result;
+    if (sourceBitmap && sourceBitmap->GetLastStatus() == Gdiplus::Ok) {
+        result.reset(sourceBitmap->Clone(0, 0, sourceBitmap->GetWidth(), sourceBitmap->GetHeight(),
+                                         PixelFormat32bppARGB));
+    }
+    stream->Release();
+    return result;
+}
+
 COLORREF batteryColor(int percent) {
     if (percent < 0) return RGB(82, 91, 102);
     if (percent <= 20) return RGB(206, 67, 67);
@@ -329,29 +516,44 @@ HICON createBatteryIcon(int percent) {
 
 class TrayApp {
 public:
-    int run(HINSTANCE instance) {
+    int run(HINSTANCE instance, bool openDashboard) {
         instance_ = instance;
+        Gdiplus::GdiplusStartupInput startupInput;
+        if (Gdiplus::GdiplusStartup(&gdiplusToken_, &startupInput, nullptr) != Gdiplus::Ok) return 1;
+        productImage_ = loadPngResource(instance_, kProductImageResource);
+        pruneStoredHistory();
         state_ = readBatteryState();
-        if (!createWindow()) return 1;
+        recordBatteryHistory(state_);
+        if (!createWindow()) {
+            Gdiplus::GdiplusShutdown(gdiplusToken_);
+            return 1;
+        }
         taskbarCreatedMessage_ = RegisterWindowMessageW(L"TaskbarCreated");
         addOrUpdateIcon(NIM_ADD);
         SetTimer(hwnd_, kTimerId, kRefreshMs, nullptr);
+        if (openDashboard) showDetails();
 
         MSG msg{};
         while (GetMessageW(&msg, nullptr, 0, 0)) {
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
+        productImage_.reset();
+        Gdiplus::GdiplusShutdown(gdiplusToken_);
         return 0;
     }
 
 private:
     HINSTANCE instance_{};
     HWND hwnd_{};
+    HWND dashboard_{};
     HICON icon_{};
     BatteryState state_{};
+    std::vector<HistorySample> history_;
     std::wstring lastSummary_;
-    bool detailsOpen_{};
+    std::unique_ptr<Gdiplus::Bitmap> productImage_;
+    ULONG_PTR gdiplusToken_{};
+    bool showWeek_{};
     UINT taskbarCreatedMessage_{};
 
     static LRESULT CALLBACK windowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
@@ -364,6 +566,17 @@ private:
         return app ? app->handleMessage(hwnd, msg, wparam, lparam) : DefWindowProcW(hwnd, msg, wparam, lparam);
     }
 
+    static LRESULT CALLBACK dashboardProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
+        auto* app = reinterpret_cast<TrayApp*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+        if (msg == WM_NCCREATE) {
+            auto* create = reinterpret_cast<CREATESTRUCTW*>(lparam);
+            app = reinterpret_cast<TrayApp*>(create->lpCreateParams);
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(app));
+        }
+        return app ? app->handleDashboardMessage(hwnd, msg, wparam, lparam)
+                   : DefWindowProcW(hwnd, msg, wparam, lparam);
+    }
+
     bool createWindow() {
         WNDCLASSW wc{};
         wc.lpfnWndProc = TrayApp::windowProc;
@@ -372,7 +585,230 @@ private:
         RegisterClassW(&wc);
         hwnd_ = CreateWindowExW(0, kWindowClass, kAppName, 0, 0, 0, 0, 0,
                                 nullptr, nullptr, instance_, this);
-        return hwnd_ != nullptr;
+        if (!hwnd_) return false;
+
+        WNDCLASSEXW dashboardClass{};
+        dashboardClass.cbSize = sizeof(dashboardClass);
+        dashboardClass.style = CS_HREDRAW | CS_VREDRAW;
+        dashboardClass.lpfnWndProc = TrayApp::dashboardProc;
+        dashboardClass.hInstance = instance_;
+        dashboardClass.hIcon = LoadIconW(instance_, MAKEINTRESOURCEW(1));
+        dashboardClass.hIconSm = dashboardClass.hIcon;
+        dashboardClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+        dashboardClass.hbrBackground = nullptr;
+        dashboardClass.lpszClassName = kDashboardClass;
+        if (!RegisterClassExW(&dashboardClass) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return false;
+
+        DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
+        RECT rect{0, 0, kDashboardWidth, kDashboardHeight};
+        AdjustWindowRectEx(&rect, style, FALSE, WS_EX_APPWINDOW);
+        dashboard_ = CreateWindowExW(WS_EX_APPWINDOW, kDashboardClass, kAppName, style,
+                                     CW_USEDEFAULT, CW_USEDEFAULT, rect.right - rect.left, rect.bottom - rect.top,
+                                     nullptr, nullptr, instance_, this);
+        return dashboard_ != nullptr;
+    }
+
+    static void fillRoundedRect(Gdiplus::Graphics& graphics, const Gdiplus::RectF& rect,
+                                float radius, const Gdiplus::Color& color) {
+        Gdiplus::GraphicsPath path;
+        float diameter = radius * 2.0f;
+        path.AddArc(rect.X, rect.Y, diameter, diameter, 180, 90);
+        path.AddArc(rect.GetRight() - diameter, rect.Y, diameter, diameter, 270, 90);
+        path.AddArc(rect.GetRight() - diameter, rect.GetBottom() - diameter, diameter, diameter, 0, 90);
+        path.AddArc(rect.X, rect.GetBottom() - diameter, diameter, diameter, 90, 90);
+        path.CloseFigure();
+        Gdiplus::SolidBrush brush(color);
+        graphics.FillPath(&brush, &path);
+    }
+
+    static void drawCenteredText(Gdiplus::Graphics& graphics, const std::wstring& text,
+                                 const Gdiplus::Font& font, const Gdiplus::RectF& rect,
+                                 const Gdiplus::Color& color) {
+        Gdiplus::StringFormat format;
+        format.SetAlignment(Gdiplus::StringAlignmentCenter);
+        format.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+        Gdiplus::SolidBrush brush(color);
+        graphics.DrawString(text.c_str(), -1, &font, rect, &format, &brush);
+    }
+
+    void drawBatteryBadge(Gdiplus::Graphics& graphics, float x, float y, const wchar_t* name,
+                          const std::wstring& value, const Gdiplus::Color& accent) {
+        Gdiplus::RectF badge(x, y, 96.0f, 58.0f);
+        fillRoundedRect(graphics, badge, 8.0f, Gdiplus::Color(244, 255, 255, 255));
+        Gdiplus::Pen border(Gdiplus::Color(34, accent.GetR(), accent.GetG(), accent.GetB()), 1.0f);
+        graphics.DrawRectangle(&border, badge.X, badge.Y, badge.Width, badge.Height);
+
+        Gdiplus::Font labelFont(L"Yu Gothic UI", 12.0f, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+        Gdiplus::Font valueFont(L"Segoe UI", 22.0f, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+        drawCenteredText(graphics, name, labelFont, Gdiplus::RectF(x, y + 5, 96, 18),
+                         Gdiplus::Color(255, 86, 92, 101));
+        drawCenteredText(graphics, value, valueFont, Gdiplus::RectF(x, y + 22, 96, 30), accent);
+    }
+
+    void drawGraphLine(Gdiplus::Graphics& graphics, const Gdiplus::RectF& chart,
+                       long long start, long long end, int HistorySample::*member,
+                       const Gdiplus::Color& color) {
+        if (end <= start) return;
+        Gdiplus::Pen pen(color, 2.4f);
+        pen.SetLineJoin(Gdiplus::LineJoinRound);
+        bool hasPrevious = false;
+        Gdiplus::PointF previous;
+        for (const auto& sample : history_) {
+            if (sample.timestamp < start || sample.timestamp > end) continue;
+            int value = sample.*member;
+            if (value < 0) {
+                hasPrevious = false;
+                continue;
+            }
+            float x = chart.X + static_cast<float>(sample.timestamp - start) /
+                                  static_cast<float>(end - start) * chart.Width;
+            float y = chart.GetBottom() - static_cast<float>(value) / 100.0f * chart.Height;
+            Gdiplus::PointF point(x, y);
+            if (hasPrevious) graphics.DrawLine(&pen, previous, point);
+            previous = point;
+            hasPrevious = true;
+        }
+    }
+
+    void paintDashboard(HWND hwnd) {
+        PAINTSTRUCT paint{};
+        HDC target = BeginPaint(hwnd, &paint);
+        RECT client{};
+        GetClientRect(hwnd, &client);
+        int width = client.right;
+        int height = client.bottom;
+        HDC memory = CreateCompatibleDC(target);
+        HBITMAP bitmap = CreateCompatibleBitmap(target, width, height);
+        HBITMAP oldBitmap = static_cast<HBITMAP>(SelectObject(memory, bitmap));
+
+        Gdiplus::Graphics graphics(memory);
+        graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+        graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+        graphics.Clear(Gdiplus::Color(255, 246, 248, 250));
+
+        Gdiplus::Font titleFont(L"Yu Gothic UI", 24.0f, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+        Gdiplus::Font subtitleFont(L"Yu Gothic UI", 12.0f, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
+        Gdiplus::SolidBrush titleBrush(Gdiplus::Color(255, 29, 33, 38));
+        Gdiplus::SolidBrush mutedBrush(Gdiplus::Color(255, 102, 110, 120));
+        graphics.DrawString(L"INZONE Buds", -1, &titleFont, Gdiplus::PointF(24, 18), &titleBrush);
+        std::wstring updated = L"最終更新: " + widen(state_.newestLocalTime());
+        if (state_.newestLocalTime().empty()) updated = L"INZONE HUBのログを待っています";
+        graphics.DrawString(updated.c_str(), -1, &subtitleFont, Gdiplus::PointF(26, 52), &mutedBrush);
+
+        if (productImage_ && productImage_->GetLastStatus() == Gdiplus::Ok) {
+            const float imageWidth = 650.0f;
+            float imageHeight = imageWidth * productImage_->GetHeight() / productImage_->GetWidth();
+            graphics.DrawImage(productImage_.get(), Gdiplus::RectF((width - imageWidth) / 2.0f, 72.0f,
+                                                                    imageWidth, imageHeight));
+        }
+
+        drawBatteryBadge(graphics, 42, 262, L"L", state_.left.label(), Gdiplus::Color(255, 39, 143, 92));
+        drawBatteryBadge(graphics, width / 2.0f - 48, 262, L"CASE", state_.caseBattery.label(),
+                         Gdiplus::Color(255, 73, 82, 94));
+        drawBatteryBadge(graphics, width - 138.0f, 262, L"R", state_.right.label(),
+                         Gdiplus::Color(255, 206, 67, 67));
+
+        Gdiplus::RectF graphCard(20, 340, static_cast<float>(width - 40), static_cast<float>(height - 360));
+        fillRoundedRect(graphics, graphCard, 8.0f, Gdiplus::Color(255, 255, 255, 255));
+        Gdiplus::Font graphTitleFont(L"Yu Gothic UI", 16.0f, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+        graphics.DrawString(L"バッテリー履歴", -1, &graphTitleFont, Gdiplus::PointF(40, 360), &titleBrush);
+
+        Gdiplus::RectF dayTab(static_cast<float>(width - 210), 352, 82, 34);
+        Gdiplus::RectF weekTab(static_cast<float>(width - 120), 352, 82, 34);
+        fillRoundedRect(graphics, dayTab, 6.0f, showWeek_ ? Gdiplus::Color(255, 238, 241, 244)
+                                                       : Gdiplus::Color(255, 36, 42, 49));
+        fillRoundedRect(graphics, weekTab, 6.0f, showWeek_ ? Gdiplus::Color(255, 36, 42, 49)
+                                                         : Gdiplus::Color(255, 238, 241, 244));
+        Gdiplus::Font tabFont(L"Yu Gothic UI", 12.0f, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+        drawCenteredText(graphics, L"1日", tabFont, dayTab,
+                         showWeek_ ? Gdiplus::Color(255, 66, 73, 82) : Gdiplus::Color(255, 255, 255, 255));
+        drawCenteredText(graphics, L"1週間", tabFont, weekTab,
+                         showWeek_ ? Gdiplus::Color(255, 255, 255, 255) : Gdiplus::Color(255, 66, 73, 82));
+
+        Gdiplus::RectF chart(72, 410, static_cast<float>(width - 110), static_cast<float>(height - 492));
+        Gdiplus::Font axisFont(L"Segoe UI", 10.0f, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
+        Gdiplus::Pen gridPen(Gdiplus::Color(255, 226, 230, 234), 1.0f);
+        for (int value : {0, 25, 50, 75, 100}) {
+            float y = chart.GetBottom() - value / 100.0f * chart.Height;
+            graphics.DrawLine(&gridPen, chart.X, y, chart.GetRight(), y);
+            drawCenteredText(graphics, std::to_wstring(value), axisFont,
+                             Gdiplus::RectF(34, y - 8, 32, 16), Gdiplus::Color(255, 122, 130, 139));
+        }
+
+        if (!history_.empty()) {
+            long long end = history_.back().timestamp;
+            long long start = end - (showWeek_ ? 7LL * 24 * 60 * 60 : 24LL * 60 * 60);
+            drawGraphLine(graphics, chart, start, end, &HistorySample::left, Gdiplus::Color(255, 39, 143, 92));
+            drawGraphLine(graphics, chart, start, end, &HistorySample::right, Gdiplus::Color(255, 206, 67, 67));
+            drawGraphLine(graphics, chart, start, end, &HistorySample::caseBattery, Gdiplus::Color(255, 73, 82, 94));
+
+            std::wstring startText = formatGraphTime(start, showWeek_);
+            std::wstring middleText = formatGraphTime(start + (end - start) / 2, showWeek_);
+            std::wstring endText = formatGraphTime(end, showWeek_);
+            drawCenteredText(graphics, startText, axisFont, Gdiplus::RectF(chart.X - 22, chart.GetBottom() + 5, 60, 18),
+                             Gdiplus::Color(255, 122, 130, 139));
+            drawCenteredText(graphics, middleText, axisFont,
+                             Gdiplus::RectF(chart.X + chart.Width / 2 - 30, chart.GetBottom() + 5, 60, 18),
+                             Gdiplus::Color(255, 122, 130, 139));
+            drawCenteredText(graphics, endText, axisFont,
+                             Gdiplus::RectF(chart.GetRight() - 38, chart.GetBottom() + 5, 76, 18),
+                             Gdiplus::Color(255, 122, 130, 139));
+        } else {
+            Gdiplus::Font emptyFont(L"Yu Gothic UI", 13.0f, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
+            drawCenteredText(graphics, L"表示できるバッテリー履歴がありません", emptyFont, chart,
+                             Gdiplus::Color(255, 122, 130, 139));
+        }
+
+        Gdiplus::Font legendFont(L"Yu Gothic UI", 11.0f, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+        float legendY = static_cast<float>(height - 34);
+        const wchar_t* legendNames[] = {L"L", L"R", L"CASE"};
+        Gdiplus::Color legendColors[] = {Gdiplus::Color(255, 39, 143, 92), Gdiplus::Color(255, 206, 67, 67),
+                                         Gdiplus::Color(255, 73, 82, 94)};
+        float legendX = width / 2.0f - 105.0f;
+        for (int i = 0; i < 3; ++i) {
+            Gdiplus::SolidBrush dot(legendColors[i]);
+            graphics.FillEllipse(&dot, legendX, legendY + 4.0f, 8.0f, 8.0f);
+            graphics.DrawString(legendNames[i], -1, &legendFont, Gdiplus::PointF(legendX + 13, legendY), &mutedBrush);
+            legendX += i == 2 ? 0.0f : 72.0f;
+        }
+
+        BitBlt(target, 0, 0, width, height, memory, 0, 0, SRCCOPY);
+        SelectObject(memory, oldBitmap);
+        DeleteObject(bitmap);
+        DeleteDC(memory);
+        EndPaint(hwnd, &paint);
+    }
+
+    LRESULT handleDashboardMessage(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
+        switch (msg) {
+            case WM_PAINT:
+                paintDashboard(hwnd);
+                return 0;
+            case WM_ERASEBKGND:
+                return 1;
+            case WM_LBUTTONUP: {
+                int x = GET_X_LPARAM(lparam);
+                int y = GET_Y_LPARAM(lparam);
+                RECT client{};
+                GetClientRect(hwnd, &client);
+                if (y >= 352 && y <= 386) {
+                    if (x >= client.right - 210 && x <= client.right - 128) showWeek_ = false;
+                    if (x >= client.right - 120 && x <= client.right - 38) showWeek_ = true;
+                    InvalidateRect(hwnd, nullptr, FALSE);
+                }
+                return 0;
+            }
+            case WM_KEYDOWN:
+                if (wparam == VK_ESCAPE) ShowWindow(hwnd, SW_HIDE);
+                return 0;
+            case WM_CLOSE:
+                ShowWindow(hwnd, SW_HIDE);
+                return 0;
+            case WM_DESTROY:
+                dashboard_ = nullptr;
+                return 0;
+        }
+        return DefWindowProcW(hwnd, msg, wparam, lparam);
     }
 
     LRESULT handleMessage(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
@@ -383,6 +819,10 @@ private:
         switch (msg) {
             case WM_TIMER:
                 refresh(false);
+                if (dashboard_ && IsWindowVisible(dashboard_)) {
+                    history_ = readBatteryHistory();
+                    InvalidateRect(dashboard_, nullptr, FALSE);
+                }
                 return 0;
             case WM_COMMAND:
                 handleCommand(LOWORD(wparam));
@@ -397,6 +837,7 @@ private:
             {
                 auto data = notifyData();
                 Shell_NotifyIconW(NIM_DELETE, &data);
+                if (dashboard_) DestroyWindow(dashboard_);
                 if (icon_) DestroyIcon(icon_);
                 PostQuitMessage(0);
                 return 0;
@@ -447,18 +888,18 @@ private:
 
     void refresh(bool show) {
         state_ = readBatteryState();
+        recordBatteryHistory(state_);
         addOrUpdateIcon(NIM_MODIFY);
         if (show) showDetails();
     }
 
     void showDetails() {
-        if (detailsOpen_) {
-            SetForegroundWindow(hwnd_);
-            return;
-        }
-        detailsOpen_ = true;
-        MessageBoxW(hwnd_, state_.details().c_str(), kAppName, MB_OK | MB_ICONINFORMATION);
-        detailsOpen_ = false;
+        if (!dashboard_) return;
+        refresh(false);
+        history_ = readBatteryHistory();
+        InvalidateRect(dashboard_, nullptr, FALSE);
+        ShowWindow(dashboard_, SW_SHOWNORMAL);
+        SetForegroundWindow(dashboard_);
     }
 
     void showMenu() {
@@ -497,7 +938,7 @@ private:
 
 }  // namespace
 
-int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
+int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR commandLine, int) {
     HANDLE mutex = CreateMutexW(nullptr, FALSE, kMutexName);
     if (mutex && GetLastError() == ERROR_ALREADY_EXISTS) {
         HANDLE noticeMutex = CreateMutexW(nullptr, FALSE, kNoticeMutexName);
@@ -510,7 +951,8 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         return 0;
     }
     TrayApp app;
-    int result = app.run(instance);
+    bool openDashboard = commandLine && wcsstr(commandLine, L"--dashboard") != nullptr;
+    int result = app.run(instance, openDashboard);
     if (mutex) CloseHandle(mutex);
     return result;
 }
