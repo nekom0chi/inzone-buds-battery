@@ -6,6 +6,13 @@ C++ / Win32 APIで作った軽量版です。Pythonは不要です。
 
 ## 最新バージョン
 
+### v1.1.1
+
+- 専用画面をPowerToys風のタイトルバーなしポップアップへ変更しました。
+- 通知領域の近くに表示し、デスクトップや他のアプリをクリックすると自動的に閉じます。
+- タスクバーに専用画面のボタンを表示せず、`Esc`キーでも閉じられるようにしました。
+- 角丸のコンパクトなパネルへ調整しました。
+
 ### v1.1.0
 
 - 通知領域アイコンの左クリックで、専用のバッテリー画面を表示するようにしました。
@@ -65,7 +72,7 @@ C++ / Win32 APIで作った軽量版です。Pythonは不要です。
 
 初めて使う人には、GitHub ReleasesのSetup版を渡すのがおすすめです。
 
-- `INZONE-Buds-Battery-Setup-v1.1.0.exe`
+- `INZONE-Buds-Battery-Setup-v1.1.1.exe`
 
 Setup版では、次の設定をまとめて行えます。
 
@@ -125,7 +132,7 @@ Setup.exeを作る場合は、[Inno Setup 6](https://jrsoftware.org/isdl.php)を
 ビルド結果:
 
 ```text
-dist-native\INZONE-Buds-Battery-Setup-v1.1.0.exe
+dist-native\INZONE-Buds-Battery-Setup-v1.1.1.exe
 ```
 
 ## 仕組み

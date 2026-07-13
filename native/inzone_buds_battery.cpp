@@ -1,3 +1,4 @@
+#define NOMINMAX
 #include <windows.h>
 #include <windowsx.h>
 #include <shellapi.h>
@@ -30,8 +31,8 @@ constexpr UINT kTrayMessage = WM_APP + 1;
 constexpr UINT_PTR kTimerId = 1;
 constexpr UINT kRefreshMs = 15000;
 constexpr int kProductImageResource = 101;
-constexpr int kDashboardWidth = 760;
-constexpr int kDashboardHeight = 640;
+constexpr int kDashboardWidth = 620;
+constexpr int kDashboardHeight = 600;
 
 constexpr UINT kCmdShow = 1001;
 constexpr UINT kCmdRefresh = 1002;
@@ -599,12 +600,15 @@ private:
         dashboardClass.lpszClassName = kDashboardClass;
         if (!RegisterClassExW(&dashboardClass) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return false;
 
-        DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
-        RECT rect{0, 0, kDashboardWidth, kDashboardHeight};
-        AdjustWindowRectEx(&rect, style, FALSE, WS_EX_APPWINDOW);
-        dashboard_ = CreateWindowExW(WS_EX_APPWINDOW, kDashboardClass, kAppName, style,
-                                     CW_USEDEFAULT, CW_USEDEFAULT, rect.right - rect.left, rect.bottom - rect.top,
+        DWORD style = WS_POPUP;
+        DWORD extendedStyle = WS_EX_TOOLWINDOW | WS_EX_TOPMOST;
+        dashboard_ = CreateWindowExW(extendedStyle, kDashboardClass, kAppName, style,
+                                     0, 0, kDashboardWidth, kDashboardHeight,
                                      nullptr, nullptr, instance_, this);
+        if (dashboard_) {
+            HRGN region = CreateRoundRectRgn(0, 0, kDashboardWidth + 1, kDashboardHeight + 1, 18, 18);
+            SetWindowRgn(dashboard_, region, FALSE);
+        }
         return dashboard_ != nullptr;
     }
 
@@ -696,7 +700,7 @@ private:
         graphics.DrawString(updated.c_str(), -1, &subtitleFont, Gdiplus::PointF(26, 52), &mutedBrush);
 
         if (productImage_ && productImage_->GetLastStatus() == Gdiplus::Ok) {
-            const float imageWidth = 650.0f;
+            const float imageWidth = std::min(650.0f, static_cast<float>(width - 64));
             float imageHeight = imageWidth * productImage_->GetHeight() / productImage_->GetWidth();
             graphics.DrawImage(productImage_.get(), Gdiplus::RectF((width - imageWidth) / 2.0f, 72.0f,
                                                                     imageWidth, imageHeight));
@@ -772,6 +776,19 @@ private:
             legendX += i == 2 ? 0.0f : 72.0f;
         }
 
+        Gdiplus::Pen popupBorder(Gdiplus::Color(255, 201, 207, 214), 1.0f);
+        Gdiplus::GraphicsPath borderPath;
+        Gdiplus::RectF borderRect(0.5f, 0.5f, static_cast<float>(width - 1), static_cast<float>(height - 1));
+        float borderDiameter = 18.0f;
+        borderPath.AddArc(borderRect.X, borderRect.Y, borderDiameter, borderDiameter, 180, 90);
+        borderPath.AddArc(borderRect.GetRight() - borderDiameter, borderRect.Y, borderDiameter, borderDiameter, 270, 90);
+        borderPath.AddArc(borderRect.GetRight() - borderDiameter, borderRect.GetBottom() - borderDiameter,
+                          borderDiameter, borderDiameter, 0, 90);
+        borderPath.AddArc(borderRect.X, borderRect.GetBottom() - borderDiameter,
+                          borderDiameter, borderDiameter, 90, 90);
+        borderPath.CloseFigure();
+        graphics.DrawPath(&popupBorder, &borderPath);
+
         BitBlt(target, 0, 0, width, height, memory, 0, 0, SRCCOPY);
         SelectObject(memory, oldBitmap);
         DeleteObject(bitmap);
@@ -781,6 +798,20 @@ private:
 
     LRESULT handleDashboardMessage(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
         switch (msg) {
+            case WM_ACTIVATE:
+                if (LOWORD(wparam) == WA_INACTIVE && IsWindowVisible(hwnd)) ShowWindow(hwnd, SW_HIDE);
+                return 0;
+            case WM_MOUSEACTIVATE:
+                return MA_ACTIVATE;
+            case WM_SIZE: {
+                int width = LOWORD(lparam);
+                int height = HIWORD(lparam);
+                if (width > 0 && height > 0) {
+                    HRGN region = CreateRoundRectRgn(0, 0, width + 1, height + 1, 18, 18);
+                    SetWindowRgn(hwnd, region, TRUE);
+                }
+                return 0;
+            }
             case WM_PAINT:
                 paintDashboard(hwnd);
                 return 0;
@@ -898,8 +929,22 @@ private:
         refresh(false);
         history_ = readBatteryHistory();
         InvalidateRect(dashboard_, nullptr, FALSE);
-        ShowWindow(dashboard_, SW_SHOWNORMAL);
+        POINT cursor{};
+        GetCursorPos(&cursor);
+        HMONITOR monitor = MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
+        MONITORINFO monitorInfo{sizeof(monitorInfo)};
+        GetMonitorInfoW(monitor, &monitorInfo);
+        int x = cursor.x - kDashboardWidth + 36;
+        int y = monitorInfo.rcWork.bottom - kDashboardHeight - 10;
+        int left = static_cast<int>(monitorInfo.rcWork.left) + 10;
+        int right = static_cast<int>(monitorInfo.rcWork.right) - kDashboardWidth - 10;
+        int top = static_cast<int>(monitorInfo.rcWork.top) + 10;
+        x = std::clamp(x, left, right);
+        y = std::max(y, top);
+        SetWindowPos(dashboard_, HWND_TOPMOST, x, y, kDashboardWidth, kDashboardHeight,
+                     SWP_SHOWWINDOW | SWP_NOOWNERZORDER);
         SetForegroundWindow(dashboard_);
+        SetFocus(dashboard_);
     }
 
     void showMenu() {

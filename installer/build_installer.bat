@@ -14,4 +14,4 @@ if not exist "%ISCC%" (
 "%ISCC%" "INZONE-Buds-Battery.iss"
 if errorlevel 1 exit /b 1
 
-echo Built: ..\dist-native\INZONE-Buds-Battery-Setup-v1.1.0.exe
+echo Built: ..\dist-native\INZONE-Buds-Battery-Setup-v1.1.1.exe
