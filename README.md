@@ -1,166 +1,96 @@
 # INZONE Buds Battery
 
-INZONE HUB の `ActionLog.log` を読み取り、INZONE Buds のバッテリー残量を通知領域にパーセント表示するWindows用ツールです。
+INZONE Budsのバッテリー残量を、Windowsの通知領域へ数字で表示する小さな常駐アプリです。
 
-C++ / Win32 APIで作った軽量版です。Pythonは不要です。
+INZONE HUBが保存している情報を利用するため、イヤホンへ直接通信しません。Pythonなどの追加ソフトも不要です。
 
-## 最新バージョン
+## できること
 
-### v1.2.2
+- 通知領域アイコンへ左右イヤホンの残量を表示
+- アイコンへカーソルを合わせると、L・R・ケースの残量を表示
+- Windows起動時の自動起動をON/OFF
+- INZONE HUBの情報が変わった時だけ更新する省負荷動作
 
-- EQ選択をWindows標準メニューから、専用画面に馴染むダークテーマのドロップダウンへ変更しました。
-- 選択中のプリセットへチェックを表示し、カーソルを合わせた行をハイライトします。
-
-### v1.0.5
-
-- v1.0.3以降で通知領域アイコンにカーソルを合わせてもバッテリー情報が表示されない問題を修正しました。
-- 新しい通知領域APIでもツールチップを表示するようにしました。
-
-### v1.0.4
-
-- v1.0.3で通知領域アイコンを右クリックしてもメニューが開かない問題を修正しました。
-- Windows 11の新しい通知領域イベント形式と従来形式の両方に対応しました。
-- 左クリックのバッテリー詳細表示も同じイベント形式に対応しました。
-
-### v1.0.3
-
-- 一定時間後やWindows Explorerの再起動後に通知領域アイコンが消える問題を修正しました。
-- タスクバーが再作成された場合、通知領域アイコンを自動的に再登録します。
-- 定期更新時にアイコンが見つからない場合も自動的に復旧します。
+専用画面、履歴グラフ、EQ変更機能はありません。必要な機能だけに絞った軽量版です。
 
 ## 必要なもの
 
-- Windows 10 / Windows 11
+- Windows 10またはWindows 11
 - INZONE HUB
 - INZONE Buds
 
+## インストール
+
+1. [GitHub Releases](https://github.com/nekom0chi/inzone-buds-battery/releases/latest)を開きます。
+2. `INZONE-Buds-Battery-Setup-v1.3.0.exe`をダウンロードします。
+3. ダウンロードしたファイルを開き、画面に沿ってインストールします。
+4. INZONE HUBを起動して、INZONE Budsを接続します。
+
+インストールしたくない場合は、ZIP版を展開して`INZONE Buds Battery.exe`を起動しても使えます。
+
+### Windowsの警告が表示された場合
+
+個人作成の未署名アプリなので、初回に「WindowsによってPCが保護されました」と表示されることがあります。GitHubのこのリポジトリから入手したファイルであれば、`詳細情報`から`実行`を選択できます。
+
 ## 使い方
 
-1. INZONE HUB を起動し、INZONE Buds を接続します。
-2. `INZONE Buds Battery.exe` をダブルクリックします。
-3. ツールは通知領域に常駐します。起動時に詳細画面は表示されません。
-4. Windows の通知領域に、左右イヤホンのうち低い方の残量がアイコン表示されます。
-5. アイコンにマウスを乗せると、`L 100% / R 100% / Case 100%` のように詳細が出ます。
-6. アイコンを左クリックすると専用のバッテリー画面、右クリックするとメニューが開きます。
+起動すると、画面右下の通知領域へ数字のアイコンが表示されます。見つからない場合は、通知領域の`^`を押して隠れているアイコンを確認してください。
 
-専用画面では、L・R・ケースの現在値とバッテリー履歴を確認できます。WEEKには今日の0時を終点とする直前7日間、DAYには選択した日の0時から24時までを縦棒で表示します。WEEKの曜日をクリックすると、その日のDAYグラフへ切り替わります。グラフはINZONE HUBのログと、このアプリが保存した履歴に残っている範囲を表示します。
+- **アイコンの数字**: 左右イヤホンのうち、残量が少ない方
+- **カーソルを合わせる**: L・R・ケースの残量を表示
+- **左クリック**: INZONE HUBの情報をすぐに読み直す
+- **右クリック**: 操作メニューを表示
 
-右上の3つの色見本で、黒・白・グラスパープルの製品画像を選べます。INZONE HUBのログやWindowsの製品名から本体色を区別できないため、初回だけ手動で選んでください。選択は次回起動時にも引き継がれます。
+右クリックメニューには次の項目があります。
 
-EQ欄をクリックすると、`Flat`、`Bass Boost`、`Music/Video`、`FPS-1`、`FPS-2`、`FPS-3`を選べます。INZONE HUBを開かず、現在有効な `INZONE Buds - Game` 出力のSony APO設定へ直接反映します。初回変更前の設定は同じフォルダへ `.inzone-battery.bak` として保存します。
-
-## メニュー
-
-通知領域アイコンを右クリックすると、次のメニューが開きます。
-
-- `バッテリーを表示`
-- `表示を更新`
-- `スタートアップ起動`
+- `今すぐ更新`
+- `スタートアップ起動: ON / OFF`
 - `終了`
 
-`表示を更新` は、INZONE HUB のログを読み直して通知領域の表示を更新します。インターネットから最新版を取得する機能ではなく、詳細ポップアップも表示しません。
+## 表示されない時
 
-`スタートアップ起動` を選ぶと、Windows起動時に自動起動する設定をON/OFFできます。設定は現在のユーザーの `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` に保存されます。
+### アイコンが見つからない
 
-## 友達に共有する場合
+通知領域の`^`を確認してください。それでも見つからない場合は、一度アプリを終了して起動し直します。
 
-初めて使う人には、GitHub ReleasesのSetup版を渡すのがおすすめです。
+### `Unknown`や`Disconnect`になる
 
-- `INZONE-Buds-Battery-Setup-v1.2.2.exe`
+INZONE HUBを起動し、INZONE Budsが接続されていることを確認します。その後、通知領域アイコンを左クリックしてください。
 
-Setup版では、次の設定をまとめて行えます。
+### Windows起動時に自動で起動したい
 
-- `%LOCALAPPDATA%\Programs\INZONE Buds Battery` へのインストール
-- スタートメニューへの登録
-- Windows起動時の自動起動
-- アンインストーラーの登録
+通知領域アイコンを右クリックし、`スタートアップ起動: OFF`を選択してONにします。
 
-インストールせずに使いたい場合は、従来どおり `.exe` 単体版も利用できます。
+## 負荷とプライバシー
 
-配布用の `.exe` は、Visual Studio / MSVC でビルドしたものをおすすめします。
-
-おすすめの配置場所:
-
-```text
-%LOCALAPPDATA%\Programs\INZONE Buds Battery\
-```
-
-例:
-
-```text
-C:\Users\<ユーザー名>\AppData\Local\Programs\INZONE Buds Battery\INZONE Buds Battery.exe
-```
-
-`Downloads` や `Desktop` でも起動できますが、長く使う場合はおすすめしません。誤って消したり移動したりすると、スタートアップ起動の設定が古い場所を指して動かなくなるためです。まず上のフォルダへ `.exe` を置いてから起動し、必要なら右クリックメニューの `スタートアップ起動` をONにしてください。
-
-初回起動時に Windows Defender SmartScreen の `Windows によって PC が保護されました` が表示されることがあります。個人作成の未署名 `.exe` ではよく起きます。信頼できる配布元から入手した場合は、`詳細情報` → `実行` で起動できます。
-
-また、一部のセキュリティソフトでは、未署名の個人作成 `.exe` や MinGW の静的リンク版が誤検知されることがあります。特に、スタートアップ起動のON/OFFはWindowsの自動起動設定を変更するため、挙動監視で警告される場合があります。不安な場合は、このリポジトリのソースコードを確認して、Visual Studio で自分でビルドしてください。
-
-## ビルド
-
-MinGW / WinLibs:
-
-```powershell
-.\native\build_mingw.bat
-```
-
-Visual Studio / Visual Studio Build Tools:
-
-```powershell
-.\native\build_msvc.bat
-```
-
-ビルド結果:
-
-```text
-dist-native\INZONE Buds Battery.exe
-```
-
-Setup.exeを作る場合は、[Inno Setup 6](https://jrsoftware.org/isdl.php)をインストールしてから実行します。
-
-```powershell
-.\installer\build_installer.bat
-```
-
-ビルド結果:
-
-```text
-dist-native\INZONE-Buds-Battery-Setup-v1.2.2.exe
-```
+- 待機中のCPU使用はほぼ0です。
+- メモリ使用量はテスト環境で約10～11 MBでした。
+- 60秒ごとにINZONE HUBログの更新有無だけを確認し、変化した時だけ読み込みます。
+- バッテリー履歴や個人情報は保存しません。
+- イヤホンへ直接通信しないため、このアプリがイヤホン側のバッテリー消費を増やすことは基本的にありません。
 
 ## 仕組み
 
-HIDを直接解析せず、INZONE HUBが出力している次のログ項目を利用しています。
-
-- `batteryStatusLeft`
-- `batteryStatusRight`
-- `batteryStatusCase`
-- `eqPreset`
-
-標準のログ場所:
+INZONE HUBの次のログを読み取っています。
 
 ```text
 %APPDATA%\Sony\INZONE Hub\ActionLog.log
 ```
 
-INZONE HUB が同じ `batteryStatusLeft` / `batteryStatusRight` / `batteryStatusCase` 形式でログを出す機種なら、INZONE Buds 以外でも使える可能性があります。ただし、現時点で動作確認しているのは INZONE Buds だけです。
+使用する項目は`batteryStatusLeft`、`batteryStatusRight`、`batteryStatusCase`だけです。
 
-## 注意
+同じ形式のログを出す機種なら、INZONE Buds以外でも動く可能性があります。ただし、現在確認できているのはINZONE Budsだけです。
 
-- INZONE HUB がログを更新しない間は、このツールの表示も更新されません。
-- 初回の履歴グラフはINZONE HUBのログに残っている範囲を表示し、以後はこのアプリが記録した履歴も利用します。
-- INZONE HUB のログ形式が変わると読み取れなくなる可能性があります。
-- EQ変更には、INZONE HUBで一度 `INZONE Buds - Game` の設定が作られている必要があります。Sonyの公開APIではなく、PC内のAPO設定へ反映するため、INZONE HUBの更新で動かなくなる可能性があります。
-- グラフ用に、時刻とL・R・ケースの残量だけを `%LOCALAPPDATA%\INZONE Buds Battery\battery-history.csv` に最大8日分保存します。
-- 個人情報やイヤホンのシリアル番号は保存しません。INZONE HUBのログからバッテリー関連の行だけを読み取ります。
-- 通知領域アイコンの数字は左右イヤホンだけを対象にします。ケース残量は詳細表示とツールチップに表示されます。
+## 開発者向けビルド
 
-## 負荷について
+Visual Studio 2022のC++環境で、次を実行します。
 
-- イヤホン本体とは直接通信しません。PC内のINZONE HUBログを読むだけなので、イヤホン側のバッテリー消費は基本的に増えません。
-- 15秒ごとにログを確認します。
-- 表示内容が変わった時だけ通知領域アイコンを作り直します。
-- 履歴ログの解析は専用画面を開いている間だけ行います。
-- 履歴ファイルは残量変化時または5分ごとに追記し、8日より古い記録を起動時に削除します。
-- 常駐中に履歴を溜め込まないため、長時間起動でメモリが増え続ける設計ではありません。
+```powershell
+.\native\build_msvc.bat
+```
+
+完成したEXEは`dist-native\INZONE Buds Battery.exe`へ作成されます。
+
+## ライセンス
+
+[MIT License](LICENSE)

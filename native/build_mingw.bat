@@ -24,7 +24,7 @@ if errorlevel 1 (
 
 "%GPP%" -std=c++17 -O2 -municode -mwindows -static -static-libgcc -static-libstdc++ inzone_buds_battery.cpp ^
   -o "..\dist-native\INZONE Buds Battery.exe" ^
-  app_icon.o -luser32 -lshell32 -lgdi32 -lgdiplus -ladvapi32 -lole32
+  app_icon.o -luser32 -lshell32 -lgdi32 -ladvapi32
 
 if errorlevel 1 (
   echo Build failed.
